@@ -11,23 +11,36 @@ def remove_ghost_papers(df):
     haupt_domain = bekannte_domains.value_counts().index[0]
     print(f"🌍 Makro-Domäne gesichert: '{haupt_domain}'")
     
-    # --- 2. DIE MIKRO-EBENE (Field) ---
-    # Wir schauen NUR NOCH in Papiere dieser Haupt-Domäne!
+    # --- 2. DIE MIKRO-EBENE (Spezifische Fields) ---
+    # DYNAMISCH FÜR ALLE FÄCHER (MINT etc.):
+    # Das generische Field heißt bei OpenAlex oft exakt wie die Domain!
+    zu_grob = ['Unknown', 'General', haupt_domain] 
+    
     df_domain = df[df['Domain'] == haupt_domain]
-    bekannte_fields = df_domain[df_domain['Field'] != 'Unknown']['Field']
-    top_fields = bekannte_fields.value_counts().head(2).index.tolist()
-    print(f"🔬 Thematischer Kern (Top 2 Fields): {top_fields}")
+    bekannte_fields = df_domain[~df_domain['Field'].isin(zu_grob)]['Field']
+    
+    if bekannte_fields.empty:
+        top_fields = []
+    else:
+        # Wir nehmen die Top 3 (statt 2), um False Negatives zu vermeiden
+        top_fields = bekannte_fields.value_counts().head(3).index.tolist()
+    print(f"🔬 Thematischer Kern (Top 3 Fields): {top_fields}")
     
     # --- 3. DIE VIP-WHITELIST BAUEN ---
-    # Nur Unis, an denen er mindestens 2 "harte" Kern-Papiere geschrieben hat
+    # Unis, an denen mind. 2 echte Kern-Papiere geschrieben wurden
     df_safe = df[df['Field'].isin(top_fields)].copy()
     uni_counts = df_safe['Uni'].value_counts()
     sichere_unis = set(uni_counts[uni_counts >= 2].index)
     
-    # --- 4. DER GERICHTS-FILTER ---
-    # Ein Paper darf bleiben, wenn es ENTWEDER zum thematischen Kern gehört,
-    # ODER wenn es an einer sicheren VIP-Uni geschrieben wurde (rettet Rand-Papiere)
-    df_clean = df[df['Field'].isin(top_fields) | df['Uni'].isin(sichere_unis)].copy()
+    # --- 4. DER GERICHTS-FILTER (Generalisiert) ---
+    # Bedingung A: Ist ein hartes Kern-Paper (Top 3 Field)
+    bedingung_kern = df['Field'].isin(top_fields)
+    
+    # Bedingung B: Paper hat ein anderes/generisches Feld ODER ist interdisziplinär, 
+    # ABER es wurde an einer unserer 100% sicheren VIP-Unis geschrieben! (Rettet Ausreißer)
+    bedingung_rettung = (~bedingung_kern) & (df['Uni'].isin(sichere_unis))
+    
+    df_clean = df[bedingung_kern | bedingung_rettung].copy()
     
     # Logge das Schlachtfest
     geloeschte = df[~df.index.isin(df_clean.index)]
