@@ -12,8 +12,6 @@ def remove_ghost_papers(df):
     print(f"🌍 Makro-Domäne gesichert: '{haupt_domain}'")
     
     # --- 2. DIE MIKRO-EBENE (Spezifische Fields) ---
-    # DYNAMISCH FÜR ALLE FÄCHER (MINT etc.):
-    # Das generische Field heißt bei OpenAlex oft exakt wie die Domain!
     zu_grob = ['Unknown', 'General', haupt_domain] 
     
     df_domain = df[df['Domain'] == haupt_domain]
@@ -22,30 +20,42 @@ def remove_ghost_papers(df):
     if bekannte_fields.empty:
         top_fields = []
     else:
-        # Wir nehmen die Top 3 (statt 2), um False Negatives zu vermeiden
         top_fields = bekannte_fields.value_counts().head(3).index.tolist()
     print(f"🔬 Thematischer Kern (Top 3 Fields): {top_fields}")
     
-    # --- 3. DIE VIP-WHITELIST BAUEN ---
-    # Unis, an denen mind. 2 echte Kern-Papiere geschrieben wurden
+    # --- 3. DIE VIP-WHITELIST (Die sicheren Häfen) ---
     df_safe = df[df['Field'].isin(top_fields)].copy()
     uni_counts = df_safe['Uni'].value_counts()
     sichere_unis = set(uni_counts[uni_counts >= 2].index)
     
-    # --- 4. DER GERICHTS-FILTER (Generalisiert) ---
+    # --- NEU: 3.5 DIE BLACKLIST (Das Immunsystem) ---
+    # Finde alle Felder, die nichts mit den Top-Feldern oder den groben Feldern zu tun haben
+    fremde_felder_df = df[~df['Field'].isin(top_fields + zu_grob)]
+    
+    # Unis, die in diesen fremden Feldern publizieren, sind verdächtig
+    verdächtige_unis = set(fremde_felder_df['Uni'].unique())
+    
+    # Eine Uni ist nur ECHT böse, wenn sie uns nicht schon als VIP-Uni bekannt ist (wie die LMU)
+    echte_boese_unis = verdächtige_unis - sichere_unis
+    
+    # --- 4. DER GERICHTS-FILTER ---
     # Bedingung A: Ist ein hartes Kern-Paper (Top 3 Field)
     bedingung_kern = df['Field'].isin(top_fields)
     
-    # Bedingung B: Paper hat ein anderes/generisches Feld ODER ist interdisziplinär, 
-    # ABER es wurde an einer unserer 100% sicheren VIP-Unis geschrieben! (Rettet Ausreißer)
-    bedingung_rettung = (~bedingung_kern) & (df['Uni'].isin(sichere_unis))
+    # Bedingung B: Rettung durch VIP-Uni in erlaubten Domänen
+    erlaubte_domains = [haupt_domain, 'Unknown']
+    bedingung_rettung = (~bedingung_kern) & (df['Uni'].isin(sichere_unis)) & (df['Domain'].isin(erlaubte_domains))
     
-    df_clean = df[bedingung_kern | bedingung_rettung].copy()
+    # NEU: Der finale Scharfrichter -> Das Paper darf NICHT von einer bösen Uni kommen!
+    bedingung_nicht_boese = ~df['Uni'].isin(echte_boese_unis)
+    
+    # Anwenden: (Kern ODER Rettung) UND NICHT Böse
+    df_clean = df[(bedingung_kern | bedingung_rettung) & bedingung_nicht_boese].copy()
     
     # Logge das Schlachtfest
     geloeschte = df[~df.index.isin(df_clean.index)]
     for _, row in geloeschte.iterrows():
-        print(f"🗑️ Blockiert ({row['Field']} | {row['Uni'][:20]}...): '{row['Titel'][:40]}...'")
+        print(f"🗑️ Blockiert ({row['Field'][:20]}... | {row['Uni'][:20]}...): '{row['Titel'][:40]}...'")
 
     # --- 5. DAS BIOLOGISCHE FENSTER ---
     if not df_clean.empty:
